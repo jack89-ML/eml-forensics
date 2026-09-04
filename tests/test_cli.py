@@ -112,6 +112,80 @@ class CliTest(unittest.TestCase):
         self.assertIn("To: Bob <bob@example.org>", md)
         self.assertNotIn("[{", md)
 
+    def test_corpus_entries_carry_auth_digest(self):
+        out = self.root / "out_auth"
+        self._run(["process", str(self.corpus), "--out", str(out)])
+        corpus = json.loads((out / "corpus.json").read_text())
+        for entry in corpus["messages"]:
+            self.assertIn("auth", entry)
+            self.assertEqual(entry["auth"]["hop_count"], 0)
+            self.assertIn("p7m", entry)
+
+    def test_graph_dot_and_json(self):
+        code, stdout, _ = self._run(
+            ["graph", str(self.corpus), "--format", "dot"])
+        self.assertEqual(code, 0)
+        self.assertTrue(stdout.startswith("digraph corpus {"))
+        code, stdout, _ = self._run(
+            ["graph", str(self.corpus), "--format", "json"])
+        payload = json.loads(stdout)
+        self.assertGreaterEqual(len(payload["nodes"]), 3)
+        self.assertGreaterEqual(len(payload["edges"]), 3)
+
+    def test_scan_detects_patterns_and_watchlist(self):
+        import email.message
+        from eml_forensics.scanner import control_char
+        target = self.root / "hits"
+        target.mkdir()
+        code15 = "RSSMRA85M01H501"
+        cf = code15 + control_char(code15)
+        message = email.message.EmailMessage()
+        message["From"] = "Alice <alice@example.com>"
+        message["To"] = "Bob <bob@example.org>"
+        message["Subject"] = "Pratica urgente"
+        message["Message-ID"] = "<scan@example.com>"
+        message["Date"] = "Sat, 10 Jan 2026 09:00:00 +0000"
+        message.set_content(
+            f"Codice fiscale {cf} e IBAN GB82WEST12345698765432. "
+            "Foglio 24, particella 941. La pratica è urgente e riservata.")
+        (target / "scan.eml").write_bytes(message.as_bytes())
+        watch = self.root / "watch.txt"
+        watch.write_text("# keywords\nurgente\nriservata\n")
+        code, stdout, _ = self._run(
+            ["scan", str(target), "--watchlist", str(watch), "--json"])
+        self.assertEqual(code, 0)
+        hits = json.loads(stdout)["hits"]
+        kinds = {h["kind"] for h in hits}
+        self.assertIn("codice_fiscale", kinds)
+        self.assertIn("iban", kinds)
+        self.assertIn("catastale", kinds)
+        self.assertIn("watchlist", kinds)
+        self.assertTrue(all(h["message_id"] == "scan@example.com"
+                            for h in hits))
+
+    def test_scan_empty_exits_one(self):
+        empty = self.root / "empty_scan"
+        empty.mkdir()
+        code, stdout, _ = self._run(["scan", str(empty), "--json"])
+        self.assertEqual(code, EXIT_EMPTY)
+        self.assertEqual(json.loads(stdout), {"hits": []})
+
+    def test_enrich_dry_run(self):
+        code, stdout, _ = self._run(
+            ["enrich", str(self.corpus), "--dry-run", "--json"])
+        self.assertEqual(code, 0)
+        rows = json.loads(stdout)["participants"]
+        self.assertGreaterEqual(len(rows), 4)
+        self.assertTrue(all(row["status"] in ("skipped", "not_checked")
+                            for row in rows))
+
+    def test_enrich_table_default(self):
+        code, stdout, _ = self._run(
+            ["enrich", str(self.corpus), "--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertIn("alice@example.com", stdout)
+        self.assertIn("email", stdout)
+
     def test_ocr_without_extra_exits_two(self):
         try:
             import pytesseract  # noqa: F401

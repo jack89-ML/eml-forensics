@@ -15,12 +15,17 @@ from pathlib import Path
 
 from . import __version__
 from .attachments import extract_attachments
+from .auth import analyze_headers
+from .enrich import collect_participants, correlate, render_table
 from .errors import (EXIT_EMPTY, EXIT_ERROR, EXIT_INTERRUPTED, ForensicsError)
+from .graph import interactions, to_dot, to_json
 from .metrics import ThreadMessage, build_threads
 from .ocr_grid import iter_ocr_targets, ocr_file
 from .output import (entry_to_dict, load_corpus, timeline_csv, timeline_rows,
                      timeline_table, write_corpus)
+from .p7m import is_p7m, payload_stem, unpack_p7m
 from .parser import ParsedMessage, iter_eml_files, parse_bytes, parse_message
+from .scanner import load_watchlist, scan_text, snippet
 
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -102,13 +107,130 @@ def _cmd_process(args) -> int:
             f"- Message-ID: {parsed.message_id}\n\n"
             f"{parsed.body_text}\n",
             encoding="utf-8")
-        entries.append(entry_to_dict(parsed, body_file))
+        entry = entry_to_dict(parsed, body_file)
+        entry["auth"] = analyze_headers(message_obj)
+        entry["p7m"] = []
+        if args.p7m and has_attachments:
+            entry["p7m"] = _unpack_p7m(message_obj, attachments_dir / base)
+        entries.append(entry)
 
     corpus = write_corpus(entries, out_dir)
     timeline = timeline_rows(entries)
     (out_dir / "timeline.csv").write_text(timeline_csv(timeline),
                                           encoding="utf-8")
     print(f"processed {len(files)} messages -> {corpus}")
+    return 0
+
+
+def _unpack_p7m(message_obj, message_dir: Path) -> list[dict]:
+    """Unwrap .p7m attachments inside a per-message folder."""
+    unpack_dir = message_dir / "unpacked"
+    results = []
+    for part in message_obj.walk():
+        filename = part.get_filename() or ""
+        if not filename:
+            continue
+        if not is_p7m(filename, part.get_content_type()):
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            continue
+        envelope_path = unpack_dir / filename
+        envelope_path.parent.mkdir(parents=True, exist_ok=True)
+        envelope_path.write_bytes(payload)
+        out_path = unpack_dir / payload_stem(filename)
+        result = unpack_p7m(envelope_path, out_path)
+        result["envelope"] = str(envelope_path)
+        results.append(result)
+    return results
+
+
+def _cmd_graph(args) -> int:
+    entries, _ = _parse_corpus_input(args.input)
+    nodes, edges = interactions(entries)
+    if not edges:
+        if args.format == "json":
+            print(to_json({}, []))
+        else:
+            print("digraph corpus {}", file=sys.stderr)
+        return EXIT_EMPTY
+    if args.format == "json":
+        output = to_json(nodes, edges)
+        if args.out:
+            Path(args.out).write_text(output, encoding="utf-8")
+        else:
+            print(output)
+    else:
+        output = to_dot(nodes, edges)
+        if args.out:
+            Path(args.out).write_text(output, encoding="utf-8")
+        else:
+            print(output)
+    return 0
+
+
+def _cmd_scan(args) -> int:
+    watchlist = load_watchlist(Path(args.watchlist)) if args.watchlist else []
+    root = Path(args.input)
+    hits: list[dict] = []
+    if root.is_dir():
+        # Full bodies available: scan the complete text of every message.
+        for file_path in iter_eml_files(root):
+            parsed = parse_message(file_path.read_bytes(), str(file_path))
+            for hit in scan_text(parsed.body_text, watchlist):
+                hits.append({
+                    "kind": hit["kind"], "value": hit["value"],
+                    "snippet": hit["snippet"],
+                    "message_id": parsed.message_id,
+                    "date_utc": parsed.date,
+                })
+        for ocr_file_path in sorted(root.rglob("*.ocr.txt")):
+            text = ocr_file_path.read_text(encoding="utf-8",
+                                           errors="replace")
+            for hit in scan_text(text, watchlist):
+                hits.append({
+                    "kind": hit["kind"], "value": hit["value"],
+                    "snippet": hit["snippet"],
+                    "message_id": f"ocr:{ocr_file_path}",
+                    "date_utc": "",
+                })
+    else:
+        entries, _ = _parse_corpus_input(args.input)
+        for entry in entries:
+            for hit in scan_text(entry.get("body_preview", ""), watchlist):
+                hits.append({
+                    "kind": hit["kind"], "value": hit["value"],
+                    "snippet": hit["snippet"],
+                    "message_id": entry.get("message_id", ""),
+                    "date_utc": entry.get("date_utc", ""),
+                })
+    if not hits:
+        if args.json:
+            print(json.dumps({"hits": []}))
+        else:
+            print("no hits (verified empty)", file=sys.stderr)
+        return EXIT_EMPTY
+    if args.json:
+        print(json.dumps({"hits": hits}, ensure_ascii=False, indent=2))
+        return 0
+    for hit in hits:
+        print(f"{hit['kind']:<14} {hit['value'][:48]:<48} "
+              f"{hit['message_id'][:40]:<40} {hit['date_utc']}")
+    return 0
+
+
+def _cmd_enrich(args) -> int:
+    entries, _ = _parse_corpus_input(args.input)
+    participants = collect_participants(entries)
+    if not participants:
+        print("no participants (verified empty)", file=sys.stderr)
+        return EXIT_EMPTY
+    rows = correlate(participants, foro=args.foro, dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps({"participants": rows}, ensure_ascii=False,
+                         indent=2))
+    else:
+        print(render_table(rows))
     return 0
 
 
@@ -223,6 +345,8 @@ def _parser() -> argparse.ArgumentParser:
     p_proc = sub.add_parser("process", help="parse a corpus to markdown + hashes")
     p_proc.add_argument("input", help="input directory (or a single .eml file)")
     p_proc.add_argument("--out", required=True, help="output directory")
+    p_proc.add_argument("--p7m", action="store_true",
+                        help="unwrap CAdES (.p7m) attachments with openssl")
 
     p_ocr = sub.add_parser("ocr", help="OCR images/PDFs with rotation grid")
     p_ocr.add_argument("input", help="file or directory")
@@ -239,6 +363,27 @@ def _parser() -> argparse.ArgumentParser:
     p_tim.add_argument("input", help="directory of .eml files or corpus.json")
     p_tim.add_argument("--format", choices=["table", "csv", "json"],
                        default="table")
+
+    p_gra = sub.add_parser("graph", help="relational interaction graph")
+    p_gra.add_argument("input", help="directory of .eml files or corpus.json")
+    p_gra.add_argument("--out", default=None,
+                       help="write DOT/JSON to a file instead of stdout")
+    p_gra.add_argument("--format", choices=["dot", "json"], default="dot")
+
+    p_sca = sub.add_parser("scan", help="pattern and watchlist scanner")
+    p_sca.add_argument("input", help="directory of .eml files or corpus.json")
+    p_sca.add_argument("--watchlist", default=None,
+                       help="file with keywords to scan (one per line)")
+    p_sca.add_argument("--json", action="store_true", help="pure JSON on stdout")
+
+    p_enc = sub.add_parser("enrich",
+                           help="correlate participants with albo-search")
+    p_enc.add_argument("input", help="directory of .eml files or corpus.json")
+    p_enc.add_argument("--foro", default=None,
+                       help="bar council queried via albo-search")
+    p_enc.add_argument("--dry-run", action="store_true",
+                       help="list participants without external calls")
+    p_enc.add_argument("--json", action="store_true", help="pure JSON on stdout")
     return parser
 
 
@@ -256,6 +401,12 @@ def run(argv: list[str] | None = None) -> int:
             return _cmd_metrics(args)
         if args.command == "timeline":
             return _cmd_timeline(args)
+        if args.command == "graph":
+            return _cmd_graph(args)
+        if args.command == "scan":
+            return _cmd_scan(args)
+        if args.command == "enrich":
+            return _cmd_enrich(args)
     except KeyboardInterrupt:
         print("interrupted by user", file=sys.stderr)
         return EXIT_INTERRUPTED
