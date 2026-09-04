@@ -219,5 +219,77 @@ class CliTest(unittest.TestCase):
         self.assertIn("interrupted", stderr)
 
 
+class ScanFullBodyTest(unittest.TestCase):
+    """Scan coverage beyond body_preview: corpus body_file resolution and
+    markdown targets in directory scans."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _run(self, argv):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = cli.run(argv)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_corpus_scan_resolves_full_body_file(self):
+        from eml_forensics.scanner import control_char
+        cf = "RSSMRA80A01H501" + control_char("RSSMRA80A01H501")
+        corpus_dir = self.root / "corpus"
+        messages = corpus_dir / "messages"
+        messages.mkdir(parents=True)
+        # fiscal code only appears AFTER the preview window (400 chars)
+        body = "contestualizzazione riservata\n" + ("x" * 450) + \
+            f"\nCodice fiscale {cf} in coda.\n"
+        (messages / "0001_deep.md").write_text(body, encoding="utf-8")
+        corpus = {
+            "count": 1,
+            "messages": [{
+                "message_id": "<deep@example.com>",
+                "date_utc": "2026-01-10T09:00:00+00:00",
+                "subject": "Deep body",
+                "body_file": "messages/0001_deep.md",
+                "body_preview": body[:200],  # no fiscal code in preview
+                "from": [{"name": "Alice", "email": "alice@example.com"}],
+                "to": [{"name": "Bob", "email": "bob@example.org"}],
+            }],
+        }
+        (corpus_dir / "corpus.json").write_text(
+            json.dumps(corpus), encoding="utf-8")
+        code, stdout, _ = self._run(
+            ["scan", str(corpus_dir / "corpus.json"), "--json"])
+        self.assertEqual(code, 0)
+        hits = json.loads(stdout)["hits"]
+        self.assertTrue(any(h["kind"] == "codice_fiscale" for h in hits))
+
+    def test_directory_scan_includes_markdown(self):
+        from eml_forensics.scanner import control_char
+        cf = "RSSMRA80A01H501" + control_char("RSSMRA80A01H501")
+        target = self.root / "tree"
+        target.mkdir()
+        (target / "note.md").write_text(
+            f"Nota riservata con codice {cf}.\n", encoding="utf-8")
+        (target / "empty.txt").write_text("nessun dato qui\n",
+                                          encoding="utf-8")
+        code, stdout, _ = self._run(["scan", str(target), "--json"])
+        self.assertEqual(code, 0)
+        hits = json.loads(stdout)["hits"]
+        self.assertTrue(any(h["kind"] == "codice_fiscale" for h in hits))
+        self.assertTrue(any(h["message_id"] == "note.md" for h in hits))
+
+    def test_directory_scan_markdown_empty_verified(self):
+        target = self.root / "tree_clean"
+        target.mkdir()
+        (target / "note.md").write_text("solo testo innocuo\n",
+                                        encoding="utf-8")
+        code, stdout, _ = self._run(["scan", str(target), "--json"])
+        self.assertEqual(code, EXIT_EMPTY)
+        self.assertEqual(json.loads(stdout), {"hits": []})
+
+
 if __name__ == "__main__":
     unittest.main()
