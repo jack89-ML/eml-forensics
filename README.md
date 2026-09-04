@@ -1,151 +1,182 @@
 # eml-forensics
 
-Offline e-discovery and digital-forensics toolkit for `.eml` corpora
-(mailbox dumps, client exports, certified PEC mail). Parses MIME messages to
-clean Markdown, extracts attachments with a SHA-256 chain of custody,
-transcribes rotated scans through an OCR rotation grid, and reconstructs
-conversation latency and silence metrics.
+[![CI](https://github.com/jack89-ML/eml-forensics/actions/workflows/test.yml/badge.svg)](https://github.com/jack89-ML/eml-forensics/actions)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Everything runs locally: the core is Python 3.10+ standard library only;
-OCR is an optional extra.
+A deterministic, offline digital-forensics and e-discovery CLI engine for `.eml` corpora (mailbox dumps, legal extractions, certified PEC mail).
 
-## Install
+Parses complex MIME structures into normalized Markdown, preserves cryptographic chains of custody with SHA-256 manifests, unwraps CAdES `.p7m` digital signatures, restores rotated scans via adaptive OCR grids, and maps communication latency and interaction networks.
+
+---
+
+## Subsystem Capabilities
+
+| Command | Functionality | Target Artefacts | Dependencies |
+| :--- | :--- | :--- | :--- |
+| `process` | MIME parsing, body de-obfuscation, SHA-256 manifests, P7M unwrapping | `*.eml` directories, `.p7m` | Python stdlib, `openssl` (optional) |
+| `ocr` | 4-way orientation grid (0°/90°/180°/270°), lexical confidence scoring | Scanned PDF, PNG, JPEG, TIFF | `[ocr]` extra (`tesseract`, `poppler`) |
+| `metrics` | Conversation DAG reconstruction, per-edge delay, blackout detection | `.eml` trees, `corpus.json` | Python stdlib |
+| `graph` | Relational social network analysis (From→To, From→Cc weights) | `corpus.json`, `.eml` trees | Python stdlib, Graphviz (optional) |
+| `scan` | Pattern & checksum validation (CF, IBAN, Cadastre, Notary), watchlist search | Corpus bodies, `*.ocr.txt` | Python stdlib |
+| `enrich` | Cross-correlate participants with official professional bar councils | Extracted identity roster | `albo-search` CLI (optional) |
+| `timeline` | Chronological linear event serialization (table, CSV, JSON) | `corpus.json`, `.eml` trees | Python stdlib |
+
+---
+
+## Forensic & Design Principles
+
+* **Standard Library Core**: Core ingestion, RFC 5322 parsing, network graph construction, checksum calculations, and data serialization require zero external Python packages.
+* **Strict Chain of Custody**: Attachments are isolated per message, sanitized against directory traversal (`../../`), and hashed with SHA-256 for both original envelopes and unpacked payloads.
+* **Deterministic Normalization**: All temporal references are converted to UTC ISO-8601 (`YYYY-MM-DDTHH:MM:SS+00:00`) regardless of source timezones or header folding.
+* **Non-Destructive Read-Only Operation**: Source corpora are treated as immutable forensic evidence and opened strictly in read-only mode. All derived artefacts are contained within `--out`.
+* **UNIX Pipeline Purity**: When invoking `--json` or `--csv`, `stdout` carries exclusively the raw structured payload; progress markers, warnings, and telemetry are routed strictly to `stderr`.
+
+---
+
+## Installation
+
+### Core Engine (Standard Library Only)
+
+Includes complete RFC parsing, timeline generation, metrics, relational graphs, pattern scanning, and P7M unwrapping (requires system `openssl`):
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
-Optional OCR support (rotation grid over images/PDFs):
+### Full Forensics & OCR Suite (Optional)
+
+Enables multi-page PDF rendering and lexical rotation-grid OCR:
 
 ```bash
-pip install -e ".[ocr]"        # pytesseract, pdf2image, Pillow
-# + a tesseract binary and poppler-utils on the system
+pip install -e ".[ocr]"
 ```
 
-## Usage
-
-```
-eml-forensics process <input_dir> --out <output_dir>   # parse + markdown + hashes
-eml-forensics process <input_dir> --out <out> --p7m     # also unwrap .p7m envelopes
-eml-forensics ocr <file_or_dir> [--lang ita+eng]       # OCR with rotation grid
-eml-forensics metrics <dir|corpus.json> [--json]       # threads, latency, blackouts
-eml-forensics timeline <dir|corpus.json> [--format table|csv|json]
-eml-forensics graph <dir|corpus.json> [--format dot|json] [--out file]
-eml-forensics scan <dir|corpus.json> [--watchlist file] [--json]
-eml-forensics enrich <dir|corpus.json> [--foro MILANO] [--dry-run] [--json]
-```
-
-`emlf` is registered as a shorthand alias.
-
-### process
-
-Scans the input recursively for `*.eml`, writes per message a Markdown file
-(metadata + cleaned body), extracts every attachment into
-`attachments/<message>/`, computes SHA-256 for each file, and emits:
-
-- `corpus.json` — machine-readable index (jq/database friendly)
-- `timeline.csv` — linear chronological view
-
-Each corpus entry also carries an `auth` digest (Received hop chain with
-per-hop delays, DKIM/SPF summaries and Authentication-Results) computed by
-the authenticity module. With `--p7m`, CAdES envelopes (`.p7m` or
-`application/pkcs7-mime`) are unwrapped via OpenSSL into
-`attachments/<message>/unpacked/`, recording SHA-256 of both envelope and
-payload plus signer/issuer certificates.
-
-Bodies are decoded with a charset fallback chain (UTF-8 → ISO-8859-1 →
-Windows-1252) and never crash the pipeline. HTML bodies are converted to
-plain text with scripts, styles, comments and 1x1 tracking pixels removed;
-parts carrying a filename or `Content-Disposition: attachment` are never
-mistaken for the body.
-
-### ocr
-
-Runs a 4-way rotation grid (0°/90°/180°/270°) on each image or PDF, scores
-each orientation by lexical quality and saves the best transcription next to
-the source as `<name>.ocr.txt`. Useful for scans that were saved rotated.
-
-### metrics
-
-Reconstructs threads through `References` / `In-Reply-To` (falling back to
-normalized subjects, stripping `Re:`/`Fwd:`/`R:`/`I:` prefixes) and reports:
-
-- thread membership and reply edges with per-edge latency (`delay_seconds`)
-- blackouts: intra-thread gaps beyond `--max-gap` days (default 30)
-
-### timeline
-
-Linear table of the whole corpus sorted by date; `--format csv|json` emits
-pure data on stdout.
-
-### graph
-
-Relational graph of the corpus: nodes are participant addresses, directed
-edges are communications From→To (solid, weight = message count) and
-From→Cc (dashed). Emits Graphviz DOT (render with
-`dot -Tpng network.dot -o network.png`) or JSON. Useful for network /
-SNA pipelines.
-
-### scan
-
-Pattern scanner over full email bodies (directory input) or corpus previews
-(corpus.json input), plus any `*.ocr.txt` transcriptions found under the
-input directory. Built-in rules validate:
-
-- Italian fiscal codes (control character check)
-- IBANs (ISO 7064 mod-97 check)
-- cadastral references (foglio / particella / mappale / subalterno)
-- notarial register references (repertorio / raccolta)
-
-`--watchlist file.txt` adds plain keywords (lines, `#` comments allowed).
-Every hit reports kind, value, message_id, UTC date and a context snippet.
-
-### enrich
-
-Lists the unique participants of a corpus (with PEC-domain flagging) and,
-when the `albo-search` CLI (`albo` alias) is installed, correlates each
-surname against the chosen bar council, annotating verified professional
-qualifications. `--dry-run` skips external calls; a missing binary never
-fails the pipeline — rows report `not_checked`.
-
-## Exit codes
-
-| Code | Meaning |
-|------|---------|
-| 0    | Success, records produced |
-| 1    | Verified empty (no .eml / no OCR targets / no messages) |
-| 2    | Operational error (missing input, missing OCR extra, tool failure) |
-| 130  | Interrupted by user (SIGINT, no traceback) |
-
-With `--json`/`--csv` the payload is the only thing written to stdout;
-diagnostics go to stderr.
-
-## Notes
-
-- Attachment filenames are sanitized against path traversal; extraction
-  never writes outside the destination directory.
-- Dates are normalized to UTC ISO-8601 regardless of the original timezone.
-- PEC headers (`X-Riferimento-Message-ID`, `X-TipoRicevuta`) are kept in a
-  dedicated `pec` block of the corpus entry.
-- `.p7m` unwrapping requires the OpenSSL binary (`openssl`); everything else
-  in the package works without third-party executables.
-- `enrich` correlation requires the separate `albo-search` CLI to be on the
-  PATH; every other command is self-contained.
-- The tool is read-only with respect to the input corpus and stores no data
-  outside the output directory you choose.
-
-## Development
+System dependencies required for OCR:
 
 ```bash
-pip install -e .
-python -m unittest discover -s tests -v
+# Debian/Ubuntu: sudo apt install tesseract-ocr tesseract-ocr-ita poppler-utils
+# macOS:         brew install tesseract poppler
 ```
 
-The suite is fully offline: synthetic fixtures are generated at test time
-(entities are RFC 2606 placeholders only) and OCR behaviour is tested
-through injected callables, not a live tesseract.
+`emlf` is registered as a global shorthand alias for `eml-forensics`.
+
+## Command Workflows & Usage
+
+### 1. Ingestion, De-obfuscation & Signature Unpacking (`process`)
+
+Scans `.eml` trees recursively, normalizes message bodies into Markdown, extracts attachments, computes cryptographic hashes, and maps transport security headers:
+
+```bash
+# Standard parsing + attachment SHA-256 chain of custody
+emlf process ./evidence/raw_eml --out ./evidence/processed
+
+# Process and automatically unwrap CAdES (.p7m) digital signatures
+emlf process ./evidence/raw_eml --out ./evidence/processed --p7m
+```
+
+Artefacts emitted in `--out`:
+
+- `messages/XXXX_Subject.md`: clean Markdown document with header metadata and sanitized text (HTML scripts, CSS, and tracking pixels removed).
+- `attachments/XXXX_Subject/`: raw extracted attachments protected against path traversal.
+- `attachments/XXXX_Subject/unpacked/`: extracted payload from `.p7m` envelopes accompanied by signer identity and CA certificate details.
+- `corpus.json`: unified machine-readable forensic index including auth hop summaries (Received, DKIM, SPF).
+- `timeline.csv`: chronologically ordered event sequence.
+
+### 2. Lexical Orientation-Grid OCR (`ocr`)
+
+Resolves scanned legal documents or exhibits saved upside down or rotated sideways:
+
+```bash
+# Run 4-way rotation analysis across all images and PDFs
+emlf ocr ./evidence/processed/attachments --lang ita+eng
+
+# Target a specific problematic document
+emlf ocr ./evidence/scans/deed_scan.pdf --out ./evidence/ocr_transcripts
+```
+
+The engine evaluates orientations at 0°, 90°, 180°, and 270°, calculates a dictionary lexical density score, rotates the document to the optimal plane, and emits a neighboring `<filename>.ocr.txt`.
+
+### 3. Thread DAG & Silence Detection (`metrics`)
+
+Reconstructs conversational trees using `References`, `In-Reply-To`, and normalized subject fallbacks:
+
+```bash
+# Inspect conversational latency and default blackouts (>30 days)
+emlf metrics ./evidence/processed/corpus.json
+
+# Identify negotiation pauses exceeding 14 days and output JSON
+emlf metrics ./evidence/processed/corpus.json --max-gap 14 --json | jq '.threads[] | select(.blackouts | length > 0)'
+```
+
+### 4. Relational Network Analysis (`graph`)
+
+Maps communication flows, distinguishing direct recipients (To) from passive observers (Cc):
+
+```bash
+# Generate a Graphviz DOT representation
+emlf graph ./evidence/processed/corpus.json --format dot --out network.dot
+
+# Render to PNG for forensic reports
+dot -Tpng network.dot -o network.png
+
+# Export raw node/edge interaction matrix for Gephi / NetworkX
+emlf graph ./evidence/processed/corpus.json --format json > interactions.json
+```
+
+### 5. Sensitive Data & Watchlist Scanner (`scan`)
+
+Audits email bodies and OCR transcriptions for regulated identifiers and evidentiary keywords:
+
+```bash
+# Scan for Italian Fiscal Codes, IBANs, cadastral mappings, and notarial references
+emlf scan ./evidence/processed/corpus.json
+
+# Scan corpus using an investigative keyword watchlist
+emlf scan ./evidence/processed --watchlist ./rules/keywords.txt --json
+```
+
+Built-in checksum engines mathematically validate Fiscal Codes (control character parity tables) and IBANs (ISO 7064 Mod-97-10).
+
+### 6. Professional Register Verification (`enrich`)
+
+Cross-references email participants against institutional registers using the `albo-search` tool:
+
+```bash
+# Verify whether participants are registered attorneys in a specific jurisdiction
+emlf enrich ./evidence/processed/corpus.json --foro MILANO
+
+# Dry-run participant extraction (identifying verified PEC addresses without queries)
+emlf enrich ./evidence/processed/corpus.json --dry-run
+```
+
+## Exit Codes (POSIX Compliance)
+
+| Exit Code | Classification | Condition |
+| :--- | :--- | :--- |
+| `0` | SUCCESS | Operation completed successfully; records or files produced. |
+| `1` | VERIFIED_EMPTY | Search or ingestion completed cleanly, but zero target entities were found. |
+| `2` | OPERATIONAL_ERROR | Missing input path, invalid parameters, missing optional extra, or system failure. |
+| `130` | INTERRUPTED | Execution halted gracefully by SIGINT (Ctrl+C); no traceback printed. |
+
+## Verification & Testing
+
+The test suite runs fully offline without external network or binary dependencies. Synthetic fixtures are generated dynamically using RFC 2606 reserved domains:
+
+```bash
+# Run complete test suite (83 unit tests, zero-leak guard included)
+python3 -m unittest discover -s tests -v
+
+# Run the security audit guard alone
+python3 -m unittest tests.test_zeroleak -v
+```
+
+## Legal & Compliance Notice
+
+This software is designed for legal professionals, digital forensics practitioners, and compliance auditors. It operates strictly in a local, read-only capacity over evidence corpora provided by the user. Users are responsible for ensuring that the ingestion and processing of correspondence conform to applicable privacy laws (including GDPR) and evidentiary rules of custody.
 
 ## License
 
-MIT
+Distributed under the terms of the MIT License.
