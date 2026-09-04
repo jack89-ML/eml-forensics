@@ -29,16 +29,20 @@ _ODD_TABLE = [1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 2, 4, 18, 20, 11, 3,
 
 
 def control_char(code15: str) -> str:
-    """Italian fiscal-code control character (weights over the first 15)."""
+    """Italian fiscal-code control character (weights over the first 15).
+
+    Odd 1-based positions map through ``_ODD_TABLE`` for letters AND digits
+    ('0'->1, '1'->0, '2'->5, ... '9'->21); even positions use the plain
+    numeric/alphabetical value.
+    """
     total = 0
     for index, char in enumerate(code15):
         position = index + 1
-        if char.isdigit():
-            value = int(char)
-        elif position % 2 == 1:
-            value = _ODD_TABLE[ord(char) - ord("A")]
+        raw = int(char) if char.isdigit() else ord(char) - ord("A")
+        if position % 2 == 1:
+            value = _ODD_TABLE[raw]
         else:
-            value = ord(char) - ord("A")
+            value = raw
         total += value
     return chr(ord("A") + total % 26)
 

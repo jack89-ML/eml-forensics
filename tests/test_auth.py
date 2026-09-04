@@ -42,6 +42,16 @@ class ReceivedTest(unittest.TestCase):
         self.assertEqual(hop.ip, "192.0.2.1")
         self.assertEqual(hop.date, "")
 
+    def test_folded_header_normalized(self):
+        """A Received header folded across lines must keep its full date."""
+        folded = ("from mail.example.org (mail.example.org [198.51.100.7])\n"
+                  "\tby mx1.example.com with ESMTP id abc;\n"
+                  " Sat, 10 Jan 2026 09:05:00 +0000")
+        hop = auth.parse_received_line(folded, 0)
+        self.assertEqual(hop.ip, "198.51.100.7")
+        self.assertEqual(hop.by, "mx1.example.com")
+        self.assertEqual(hop.date, "2026-01-10T09:05:00+00:00")
+
 
 class SecurityHeadersTest(unittest.TestCase):
     def _message(self):
