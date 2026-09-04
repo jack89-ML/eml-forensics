@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .parser import ParsedMessage
@@ -32,7 +32,7 @@ def entry_to_dict(parsed: ParsedMessage, body_file: str = "") -> dict:
 
 def write_corpus(entries: list[dict], out_dir: Path) -> Path:
     payload = {
-        "generated_utc": datetime.utcnow().isoformat() + "Z",
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
         "count": len(entries),
         "messages": entries,
     }

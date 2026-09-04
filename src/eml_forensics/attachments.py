@@ -3,18 +3,48 @@ of custody."""
 
 from __future__ import annotations
 
+import email.header
 import hashlib
 import os
 import re
 from pathlib import Path
 
-_SAFE_RE = re.compile(r"[^A-Za-z0-9._ -]+")
+_SAFE_RE = re.compile(r"[^\w. -]+")
+_DECODE_CHAIN = ("utf-8", "iso-8859-1", "windows-1252")
+
+
+def _decode_rfc2047(value: str) -> str:
+    """Decode encoded words (RFC 2047) in a MIME filename."""
+    if "=?" not in value:
+        return value
+    parts = []
+    for text, charset in email.header.decode_header(value):
+        if isinstance(text, bytes):
+            if charset:
+                try:
+                    parts.append(text.decode(charset))
+                    continue
+                except (LookupError, UnicodeDecodeError):
+                    pass
+            for candidate in _DECODE_CHAIN:
+                try:
+                    parts.append(text.decode(candidate))
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                parts.append(text.decode("utf-8", errors="replace"))
+        else:
+            parts.append(text)
+    return "".join(parts)
 
 
 def safe_filename(raw_name: str, fallback_index: int = 0) -> str:
-    """Neutralize a MIME filename: keep only the basename, strip traversal
-    and odd characters. Never returns an absolute or parent-relative path."""
-    name = raw_name.replace("\\", "/").rsplit("/", 1)[-1]
+    """Neutralize a MIME filename: RFC 2047-decode, keep only the basename,
+    strip traversal and odd characters. Never returns an absolute or
+    parent-relative path."""
+    name = _decode_rfc2047(raw_name)
+    name = name.replace("\\", "/").rsplit("/", 1)[-1]
     name = name.strip(" .")
     name = _SAFE_RE.sub("_", name)
     if not name:

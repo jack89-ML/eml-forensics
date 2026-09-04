@@ -70,6 +70,40 @@ class ParserTest(unittest.TestCase):
         files = parser.iter_eml_files(self.dir)
         self.assertEqual(len(files), 8)
 
+    def test_attached_text_never_becomes_body(self):
+        """A message whose only text/plain part is an attachment must not
+        use the attachment text as its body."""
+        import email.message
+        message = email.message.EmailMessage()
+        message["From"] = "Alice <alice@example.com>"
+        message["To"] = "Bob <bob@example.org>"
+        message["Subject"] = "Html body only"
+        message["Message-ID"] = "<htmlbody@example.com>"
+        message["Date"] = "Sat, 10 Jan 2026 09:00:00 +0000"
+        message.set_content(
+            "<html><body><p>The real body lives here.</p></body></html>",
+            subtype="html")
+        message.add_attachment(b"this is an attached document, not the body",
+                               maintype="text", subtype="plain",
+                               filename="notes.txt")
+        parsed = parser.parse_message(message.as_bytes())
+        self.assertTrue(parsed.body_from_html)
+        self.assertIn("The real body lives here.", parsed.body_text)
+        self.assertNotIn("attached document", parsed.body_text)
+
+    def test_message_with_only_attached_text_has_empty_body(self):
+        import email.message
+        message = email.message.EmailMessage()
+        message["From"] = "Alice <alice@example.com>"
+        message["To"] = "Bob <bob@example.org>"
+        message["Subject"] = "Only an attachment"
+        message["Message-ID"] = "<onlyatt@example.com>"
+        message["Date"] = "Sat, 10 Jan 2026 09:00:00 +0000"
+        message.add_attachment(b"sole payload", maintype="text",
+                               subtype="plain", filename="data.txt")
+        parsed = parser.parse_message(message.as_bytes())
+        self.assertEqual(parsed.body_text, "")
+
 
 if __name__ == "__main__":
     unittest.main()
