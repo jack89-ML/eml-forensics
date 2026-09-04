@@ -68,6 +68,18 @@ def choose_best_angle(ocr_call, image, lang: str) -> tuple[int, str]:
     return best_angle, best_text
 
 
+def _most_frequent_angle(angles: list[int]) -> int:
+    """Most common angle across PDF pages; ties go to the earliest seen."""
+    if not angles:
+        return 0
+    best, best_count = angles[0], 0
+    for angle in angles:
+        count = angles.count(angle)
+        if count > best_count:
+            best, best_count = angle, count
+    return best
+
+
 def ocr_file(path: Path, lang: str = "ita+eng", out_dir: Path | None = None,
              suffix: str = ".ocr.txt") -> tuple[Path, int, str]:
     """OCR one image/PDF with rotation-grid orientation. Returns
@@ -85,11 +97,14 @@ def ocr_file(path: Path, lang: str = "ita+eng", out_dir: Path | None = None,
         pages = convert_from_path(str(path))
         if not pages:
             raise ForensicsError(f"no pages rendered from {path.name}")
-        best_angle, best_text = 0, ""
+        page_angles: list[int] = []
+        best_text = ""
         for page in pages:
             angle, text = choose_best_angle(
                 pytesseract.image_to_string, page.convert("RGB"), lang)
+            page_angles.append(angle)
             best_text += text + "\n"
+        best_angle = _most_frequent_angle(page_angles)
     else:
         raise ForensicsError(f"unsupported input for OCR: {path.name}")
 

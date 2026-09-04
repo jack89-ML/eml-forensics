@@ -167,9 +167,19 @@ class ParsedMessage:
 
 
 def _first_text_body(message) -> tuple[str | None, bool]:
-    """Preferred body: text/plain; falls back to text/html converted."""
+    """Preferred body: text/plain; falls back to text/html converted.
+
+    Parts carrying a ``filename`` or a ``Content-Disposition: attachment``
+    are never treated as the message body — an attached .txt or .html file
+    is an attachment, not the email text.
+    """
     plain: str | None = None
     for part in message.walk():
+        if part.get_filename():
+            continue
+        disposition = str(part.get("Content-Disposition", "")).lower()
+        if "attachment" in disposition:
+            continue
         ctype = part.get_content_type()
         if ctype == "text/plain" and plain is None:
             plain = part_text(part)

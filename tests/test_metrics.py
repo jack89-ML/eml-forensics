@@ -79,6 +79,40 @@ class ThreadMetricsTest(unittest.TestCase):
         kickoff = next(t for t in threads if "Project kickoff" in t.subject)
         self.assertEqual(kickoff.blackouts, [])
 
+    def test_future_message_is_never_a_parent(self):
+        """Without reference headers, replies chain to predecessors only —
+        a later message can never parent an earlier one."""
+        base = "2026-02-01T09:00:00+00:00"
+
+        def msg(msg_id, day, subject="Status report"):
+            return ThreadMessage(
+                message_id=msg_id, subject=subject,
+                subject_norm=normalize_subject(subject),
+                date=f"2026-02-{day:02d}T09:00:00+00:00",
+                from_email="alice@example.com")
+
+        messages = [msg("a@example.com", 1), msg("b@example.com", 3),
+                    msg("c@example.com", 5)]
+        threads = build_threads(messages)
+        self.assertEqual(len(threads), 1)
+        edges = threads[0].edges
+        parents = {e.child: e.parent for e in edges}
+        self.assertEqual(parents.get("b@example.com"), "a@example.com")
+        self.assertEqual(parents.get("c@example.com"), "b@example.com")
+        self.assertNotIn("a@example.com", parents)  # root has no parent
+        for edge in edges:
+            child_time = next(m.when for m in messages
+                              if m.message_id == edge.child)
+            parent_time = next(m.when for m in messages
+                               if m.message_id == edge.parent)
+            self.assertGreater(child_time, parent_time)
+
+    def test_iso_z_suffix_parses(self):
+        from eml_forensics.metrics import _parse_utc
+        parsed = _parse_utc("2026-01-10T09:00:00Z")
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.hour, 9)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,7 +29,10 @@ def _parse_utc(value: str):
     if not value:
         return None
     try:
-        parsed = _dt.datetime.fromisoformat(value)
+        normalized = value
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+        parsed = _dt.datetime.fromisoformat(normalized)
     except ValueError:
         return None
     if parsed.tzinfo is None:
@@ -141,10 +144,9 @@ def build_threads(messages: list[ThreadMessage],
                     assigned.get(message.in_reply_to) == thread_id:
                 parent = by_id[message.in_reply_to]
             if parent is None and message is not ordered[0]:
-                # adjacent same-subject predecessor inside the thread
-                for earlier in reversed(ordered):
-                    if earlier.message_id == message.message_id:
-                        continue
+                # adjacent same-subject predecessor strictly inside the thread
+                index = ordered.index(message)
+                for earlier in reversed(ordered[:index]):
                     if earlier.subject_norm == message.subject_norm:
                         parent = earlier
                         break

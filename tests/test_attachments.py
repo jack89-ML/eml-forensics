@@ -50,6 +50,12 @@ class AttachmentsTest(unittest.TestCase):
             # nothing escaped the destination directory
             self.assertEqual(list(root.rglob("*.txt")), [root / "evil.txt"])
 
+    def test_safe_filename_decodes_rfc2047(self):
+        # RFC 2047 Q-encoding: underscore = space, =E8 = "è"
+        decoded = attachments.safe_filename(
+            "=?ISO-8859-1?Q?Rapporto_=E8_finale.txt?=")
+        self.assertEqual(decoded, "Rapporto è finale.txt")
+
     def test_safe_filename_edges(self):
         self.assertEqual(attachments.safe_filename("../../etc/passwd"), "passwd")
         self.assertEqual(attachments.safe_filename("a\\b\\c.txt"), "c.txt")

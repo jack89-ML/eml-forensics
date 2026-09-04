@@ -30,11 +30,28 @@ def _slug(value: str, fallback: str) -> str:
     return slug or fallback
 
 
+def _address_str(addresses: list) -> str:
+    """Format an address list as 'Name <email>' entries joined by '; '."""
+    parts = []
+    for entry in addresses or []:
+        name = entry.get("name", "")
+        email_addr = entry.get("email", "")
+        if name and email_addr:
+            parts.append(f"{name} <{email_addr}>")
+        else:
+            parts.append(email_addr or name)
+    return "; ".join(parts)
+
+
 def _parse_corpus_input(input_arg: str) -> tuple[list[dict], str]:
-    """Accept a directory of .eml files or an existing corpus.json."""
+    """Accept a directory of .eml files or a corpus.json (file or directory
+    containing one)."""
     path = Path(input_arg)
-    if path.is_file() and path.name == "corpus.json":
-        return load_corpus(path), "corpus"
+    corpus_file = path if (path.is_file() and path.name == "corpus.json") else \
+        (path / "corpus.json") if (path.is_dir() and
+                                   (path / "corpus.json").is_file()) else None
+    if corpus_file is not None:
+        return load_corpus(corpus_file), "corpus"
     files = iter_eml_files(path)
     entries = []
     for file_path in files:
@@ -62,14 +79,27 @@ def _cmd_process(args) -> int:
     for index, file_path in enumerate(files, start=1):
         raw = file_path.read_bytes()
         parsed: ParsedMessage = parse_message(raw, str(file_path))
-        parsed.attachments = extract_attachments(parse_bytes(raw),
-                                                 attachments_dir)
         base = f"{index:04d}_{_slug(parsed.subject, parsed.message_id or 'msg')}"
+        # Per-message attachment folder: same-named files from different
+        # emails can never overwrite each other.
+        message_obj = parse_bytes(raw)
+        has_attachments = any(part.get_filename()
+                              for part in message_obj.walk())
+        parsed.attachments = []
+        if has_attachments:
+            message_attach_dir = attachments_dir / base
+            parsed.attachments = extract_attachments(message_obj,
+                                                     message_attach_dir)
+            for item in parsed.attachments:
+                item["file"] = f"attachments/{item['file']}"
         body_file = f"{base}.md"
         (messages_dir / body_file).write_text(
             f"# {parsed.subject}\n\n"
-            f"- Date: {parsed.date}\n- From: {parsed.from_addr}\n"
-            f"- To: {parsed.to}\n- Message-ID: {parsed.message_id}\n\n"
+            f"- Date: {parsed.date}\n"
+            f"- From: {_address_str(parsed.from_addr)}\n"
+            f"- To: {_address_str(parsed.to)}\n"
+            f"- Cc: {_address_str(parsed.cc)}\n"
+            f"- Message-ID: {parsed.message_id}\n\n"
             f"{parsed.body_text}\n",
             encoding="utf-8")
         entries.append(entry_to_dict(parsed, body_file))

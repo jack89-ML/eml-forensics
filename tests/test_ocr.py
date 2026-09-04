@@ -22,6 +22,11 @@ class ScoringTest(unittest.TestCase):
     def test_empty_scores_zero(self):
         self.assertEqual(ocr_grid.score_text(""), 0.0)
 
+    def test_pdf_angle_majority(self):
+        self.assertEqual(ocr_grid._most_frequent_angle([90, 0, 90, 90]), 90)
+        self.assertEqual(ocr_grid._most_frequent_angle([90, 0]), 90)
+        self.assertEqual(ocr_grid._most_frequent_angle([]), 0)
+
 
 class AngleSelectionTest(unittest.TestCase):
     def test_best_angle_selected(self):

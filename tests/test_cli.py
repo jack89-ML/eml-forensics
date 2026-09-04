@@ -39,8 +39,15 @@ class CliTest(unittest.TestCase):
         self.assertTrue((out / "timeline.csv").is_file())
         md_files = list((out / "messages").glob("*.md"))
         self.assertGreaterEqual(len(md_files), 8)
-        att = list((out / "attachments").iterdir())
-        self.assertEqual(len(att), 3)  # notes.txt, plan.png, evil.txt
+        att_files = [p for p in (out / "attachments").rglob("*") if p.is_file()]
+        self.assertEqual(len(att_files), 3)  # notes.txt, plan.png, evil.txt
+        # per-message folders: attachments live in 01_*/ and 08_*/ subdirs
+        self.assertTrue(any("01_" in p.parent.name for p in att_files))
+        self.assertTrue(any("08_" in p.parent.name for p in att_files))
+        for message in corpus["messages"]:
+            for attachment in message["attachments"]:
+                self.assertTrue(
+                    attachment["file"].startswith("attachments/0"))
         hashes = {a["sha256"] for m in corpus["messages"]
                   for a in m["attachments"]}
         self.assertEqual(len(hashes), 3)
@@ -86,6 +93,24 @@ class CliTest(unittest.TestCase):
             ["metrics", str(out / "corpus.json"), "--json"])
         self.assertEqual(code, 0)
         json.loads(stdout)
+
+    def test_metrics_accepts_directory_containing_corpus(self):
+        out = self.root / "out3"
+        self._run(["process", str(self.corpus), "--out", str(out)])
+        code, stdout, _ = self._run(["metrics", str(out), "--json"])
+        self.assertEqual(code, 0)
+        json.loads(stdout)
+
+    def test_markdown_body_has_clean_addresses(self):
+        out = self.root / "out4"
+        code, _, _ = self._run(["process", str(self.corpus), "--out", str(out)])
+        self.assertEqual(code, 0)
+        md_files = list((out / "messages").glob("0001_*.md"))
+        self.assertEqual(len(md_files), 1)
+        md = md_files[0].read_text()
+        self.assertIn("From: Alice <alice@example.com>", md)
+        self.assertIn("To: Bob <bob@example.org>", md)
+        self.assertNotIn("[{", md)
 
     def test_ocr_without_extra_exits_two(self):
         try:
