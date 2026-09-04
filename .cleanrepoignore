@@ -1,0 +1,7 @@
+# Deterministic benign test vectors and public doc artefacts (see audit
+# triage 2026-09-04): ISO sample IBANs in unit tests, 1px PNG fixture,
+# cryptographic OID identifiers in the case-study writeup.
+tests/fixtures/*
+docs/CASE_STUDIES.md
+tests/test_scanner.py
+tests/test_cli.py
