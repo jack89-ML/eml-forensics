@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eml-forensics"
+version = "0.1.0"
+description = "Offline e-discovery toolkit for .eml corpora: MIME parsing, Markdown export, attachment hashing, OCR rotation grid, thread latency metrics."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "eml-forensics contributors" }]
+keywords = ["forensics", "ediscovery", "email", "eml", "mime", "ocr", "cli"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Utilities",
+  "Topic :: Security",
+]
+dependencies = []
+
+[project.optional-dependencies]
+ocr = ["pytesseract>=0.3.10", "pdf2image>=1.16", "Pillow>=10.0"]
+
+[project.scripts]
+eml-forensics = "eml_forensics.cli:main"
+emlf = "eml_forensics.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
