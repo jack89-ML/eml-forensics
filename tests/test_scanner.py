@@ -80,5 +80,42 @@ class WatchlistLoaderTest(unittest.TestCase):
             self.assertEqual(words, ["urgente", "conferma"])
 
 
+class CadastralContextTest(unittest.TestCase):
+    """Short 'part. N' references need an explicit foglio on the same line
+    to avoid false positives like 'part. 1' = 'parte prima'."""
+
+    def _catastale(self, text: str) -> list[str]:
+        return [h["value"] for h in scanner.scan_text(text)
+                if h["kind"] == "catastale"]
+
+    def test_short_part_alone_is_not_cadastral(self):
+        # 'part. 1' as 'parte prima' must NOT fire without a foglio nearby
+        self.assertEqual(self._catastale("vedi part. 1 del contratto.\n"), [])
+        self.assertEqual(self._catastale("Sezione part. 12 delle regole.\n"),
+                         [])
+
+    def test_short_part_with_foglio_same_line(self):
+        values = self._catastale("Immobile al Foglio 24, part. 1 e part. 2.\n")
+        self.assertTrue(any(v.lower() == "foglio 24" for v in values))
+        self.assertIn("part. 1", values)
+        self.assertIn("part. 2", values)
+
+    def test_short_part_with_fg_abbreviation(self):
+        values = self._catastale("fg. 5 part. 9\n")
+        self.assertTrue(any("fg. 5" in v.lower() for v in values))
+        self.assertTrue(any("part. 9" in v for v in values))
+
+    def test_explicit_forms_always_fire(self):
+        # particella/mappale are normalized to 'part.' in the value field
+        self.assertIn("part. 6", self._catastale("particella 6\n"))
+        self.assertIn("part. 3", self._catastale("mappale 3\n"))
+        self.assertIn("part. 182", self._catastale("part. 182\n"))
+        self.assertIn("subalterno 5", self._catastale("subalterno 5\n"))
+
+    def test_foglio_standalone_still_fires(self):
+        values = self._catastale("Il terreno è nel foglio 20\n")
+        self.assertTrue(any("foglio 20" in v.lower() for v in values))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,11 +14,17 @@ from pathlib import Path
 
 CF_RE = re.compile(r"\b[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]\b")
 IBAN_RE = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b")
-CADASTRE_RE = re.compile(
-    r"(?:\b(?:foglio|fg)\.?\s*\d+|\b(?:particella|part\.?|mappale)\.?\s*\d+"
-    r"|\bsub(?:alterno)?\.?\s*\d+)",
+FOGLIO_MARK_RE = re.compile(r"\bfoglio\b|\bfg\.", re.I)
+CADASTRE_FOGLIO_RE = re.compile(
+    r"\b(?:foglio|fg)\.?\s*\d+", re.I)
+CADASTRE_EXPLICIT_RE = re.compile(
+    r"\b(?:particella|mappale)\.?\s*\d+|\bpart\.\s*\d{3,}\b"
+    r"|\bsub(?:alterno)?\.?\s*\d+",
     re.I,
 )
+# "part. N" with a 1-2 digit N is ambiguous ("parte prima"): require the
+# same line to carry an explicit foglio/fg. reference before reporting it.
+CADASTRE_SHORT_PART_RE = re.compile(r"\bpart\.\s*\d{1,2}\b", re.I)
 NOTARY_RE = re.compile(
     r"(?:\b(?:repertorio|rep\.?|raccolta|rg\.?)\s*(?:n\.?|nr\.?)?\s*\d+)",
     re.I,
@@ -70,6 +76,24 @@ def _norm_catastre(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _scan_cadastral(text: str, push) -> None:
+    """Cadastral references with context rules for short part. numbers."""
+    line_start = 0
+    for raw_line in text.splitlines(keepends=True):
+        has_foglio = FOGLIO_MARK_RE.search(raw_line) is not None
+        for match in CADASTRE_FOGLIO_RE.finditer(raw_line):
+            push("catastale", _norm_catastre(match.group(0)),
+                 snippet(text, line_start + match.start()))
+        for match in CADASTRE_EXPLICIT_RE.finditer(raw_line):
+            push("catastale", _norm_catastre(match.group(0)),
+                 snippet(text, line_start + match.start()))
+        if has_foglio:
+            for match in CADASTRE_SHORT_PART_RE.finditer(raw_line):
+                push("catastale", _norm_catastre(match.group(0)),
+                     snippet(text, line_start + match.start()))
+        line_start += len(raw_line)
+
+
 def scan_text(text: str, watchlist: list[str] | None = None) -> list[dict]:
     """Built-in pattern scan + optional keyword hits.
 
@@ -92,9 +116,7 @@ def scan_text(text: str, watchlist: list[str] | None = None) -> list[dict]:
     for match in IBAN_RE.finditer(text):
         if iban_valid(match.group(0)):
             push("iban", match.group(0), snippet(text, match.start()))
-    for match in CADASTRE_RE.finditer(text):
-        push("catastale", _norm_catastre(match.group(0)),
-             snippet(text, match.start()))
+    _scan_cadastral(text, push)
     for match in NOTARY_RE.finditer(text):
         push("notarile", match.group(0).strip(), snippet(text, match.start()))
 
