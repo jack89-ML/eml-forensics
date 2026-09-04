@@ -166,12 +166,25 @@ emlf enrich ./evidence/processed/corpus.json --dry-run
 The test suite runs fully offline without external network or binary dependencies. Synthetic fixtures are generated dynamically using RFC 2606 reserved domains:
 
 ```bash
-# Run complete test suite (83 unit tests, zero-leak guard included)
+# Run complete test suite (91 unit tests, zero-leak guard included)
 python3 -m unittest discover -s tests -v
 
 # Run the security audit guard alone
 python3 -m unittest tests.test_zeroleak -v
 ```
+
+## Empirical Validation & Case Studies
+
+`eml-forensics` is benchmarked against real-world corpora:
+
+* **Enron Email Corpus**: Processed 100 RFC 822 messages to reconstruct a 460-node relational network graph and detect multi-month communication blackouts.
+* **Italian Public Administration**: Tested against CAdES `.p7m` multi-signed municipal determinations (ArubaPEC & InfoCert), successfully unwrapping CMS containers and extracting verified cadastral identifiers.
+
+Detailed methodology, graph metrics, and reproducer commands are documented in [`docs/CASE_STUDIES.md`](docs/CASE_STUDIES.md).
+
+<p align="center">
+  <img src="assets/enron_graph.png" alt="Enron Interaction Graph" width="700">
+</p>
 
 ## Legal & Compliance Notice
 
