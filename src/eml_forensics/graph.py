@@ -20,7 +20,9 @@ def interactions(entries: list[dict]) -> tuple[dict, list[dict]]:
     nodes: dict[str, dict] = {}
     edges: dict[tuple[str, str], dict] = {}
 
-    def node(entry: dict) -> str:
+    def node(entry) -> str:
+        if not isinstance(entry, dict):
+            return ""
         address = _clean_address(entry)
         if not address:
             return ""
@@ -31,7 +33,10 @@ def interactions(entries: list[dict]) -> tuple[dict, list[dict]]:
         return address
 
     for message in entries:
-        sender = node(message.get("from")[0]) if message.get("from") else ""
+        sender = ""
+        if isinstance(message.get("from"), list) and message["from"] and \
+                isinstance(message["from"][0], dict):
+            sender = node(message["from"][0])
         if not sender:
             continue
         for recipient in message.get("to", []):

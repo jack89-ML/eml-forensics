@@ -15,6 +15,12 @@ class FiscalCodeTest(unittest.TestCase):
         broken = code[:15] + ("X" if code[15] != "X" else "Y")
         self.assertFalse(scanner.cf_valid(broken))
 
+    def test_reference_fiscal_code_matches_ministerial_standard(self):
+        # Widely used reference sample: RSSMRA80A01H501U
+        self.assertTrue(scanner.cf_valid("RSSMRA80A01H501U"))
+        self.assertEqual(scanner.control_char("RSSMRA80A01H501"), "U")
+        self.assertFalse(scanner.cf_valid("RSSMRA80A01H501X"))
+
     def test_malformed_rejected(self):
         self.assertFalse(scanner.cf_valid("12345"))
         self.assertFalse(scanner.cf_valid("RSSMRA85M01H501"))

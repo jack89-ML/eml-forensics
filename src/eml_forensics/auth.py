@@ -61,6 +61,9 @@ class Hop:
 
 def parse_received_line(line: str, index: int) -> Hop:
     hop = Hop(index=index)
+    # Folded headers arrive with newlines/spaces: normalize so the date
+    # regex never gets truncated.
+    line = re.sub(r"\s+", " ", line).strip()
     match = _IP_RE.search(line)
     if match:
         hop.ip = match.group(1)
