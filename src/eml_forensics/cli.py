@@ -174,7 +174,8 @@ def _cmd_scan(args) -> int:
     root = Path(args.input)
     hits: list[dict] = []
     if root.is_dir():
-        # Full bodies available: scan the complete text of every message.
+        # Full bodies available: scan .eml parses, de-obfuscated .md bodies
+        # and any .ocr.txt transcriptions found under the tree.
         for file_path in iter_eml_files(root):
             parsed = parse_message(file_path.read_bytes(), str(file_path))
             for hit in scan_text(parsed.body_text, watchlist):
@@ -183,6 +184,15 @@ def _cmd_scan(args) -> int:
                     "snippet": hit["snippet"],
                     "message_id": parsed.message_id,
                     "date_utc": parsed.date,
+                })
+        for md_path in sorted(root.rglob("*.md")):
+            text = md_path.read_text(encoding="utf-8", errors="replace")
+            for hit in scan_text(text, watchlist):
+                hits.append({
+                    "kind": hit["kind"], "value": hit["value"],
+                    "snippet": hit["snippet"],
+                    "message_id": md_path.relative_to(root).as_posix(),
+                    "date_utc": "",
                 })
         for ocr_file_path in sorted(root.rglob("*.ocr.txt")):
             text = ocr_file_path.read_text(encoding="utf-8",
@@ -196,8 +206,24 @@ def _cmd_scan(args) -> int:
                 })
     else:
         entries, _ = _parse_corpus_input(args.input)
+        # body_file paths are relative to the corpus.json location.
+        corpus_path = Path(args.input)
+        base = corpus_path.parent if (corpus_path.is_file()
+                                      and corpus_path.name == "corpus.json") \
+            else corpus_path
         for entry in entries:
-            for hit in scan_text(entry.get("body_preview", ""), watchlist):
+            text = None
+            body_file = entry.get("body_file") or ""
+            if body_file:
+                resolved = Path(body_file)
+                if not resolved.is_absolute():
+                    resolved = base / body_file
+                if resolved.is_file():
+                    text = resolved.read_text(encoding="utf-8",
+                                              errors="replace")
+            if text is None:
+                text = entry.get("body_preview", "")
+            for hit in scan_text(text, watchlist):
                 hits.append({
                     "kind": hit["kind"], "value": hit["value"],
                     "snippet": hit["snippet"],
