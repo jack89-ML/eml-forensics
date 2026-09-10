@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,25 +8,43 @@ version = "0.1.0"
 description = "Offline e-discovery toolkit for .eml corpora: MIME parsing, Markdown export, attachment hashing, OCR rotation grid, thread latency metrics."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "eml-forensics contributors" }]
-keywords = ["forensics", "ediscovery", "email", "eml", "mime", "ocr", "cli"]
+keywords = [
+  "forensics", "ediscovery", "email", "eml", "mime", "p7m", "cades",
+  "ocr", "chain-of-custody", "graph", "cli",
+]
 classifiers = [
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
-  "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Legal Industry",
+  "Intended Audience :: Information Technology",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Topic :: Utilities",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Security",
+  "Topic :: Utilities",
 ]
 dependencies = []
 
 [project.optional-dependencies]
 ocr = ["pytesseract>=0.3.10", "pdf2image>=1.16", "Pillow>=10.0"]
+dev = ["build>=1.2", "twine>=5.1"]
 
 [project.scripts]
 eml-forensics = "eml_forensics.cli:main"
 emlf = "eml_forensics.cli:main"
+
+[project.urls]
+Homepage = "https://jack89-ml.github.io/#products"
+Repository = "https://github.com/jack89-ML/eml-forensics"
+Issues = "https://github.com/jack89-ML/eml-forensics/issues"
+Changelog = "https://github.com/jack89-ML/eml-forensics/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

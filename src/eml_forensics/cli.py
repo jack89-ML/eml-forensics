@@ -416,8 +416,14 @@ def _parser() -> argparse.ArgumentParser:
 def run(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
-    except SystemExit:
-        return EXIT_ERROR
+    except SystemExit as exc:
+        # argparse raises SystemExit(0) for --help/--version and SystemExit(2)
+        # for usage errors (already printed to stderr). Returning EXIT_ERROR
+        # for both made `--help` and `--version` look like failures.
+        code = exc.code
+        if isinstance(code, int):
+            return code
+        return EXIT_OK if code is None else EXIT_ERROR
     try:
         if args.command == "process":
             return _cmd_process(args)

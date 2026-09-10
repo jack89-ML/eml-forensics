@@ -205,6 +205,17 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, EXIT_ERROR)
         self.assertIn("not found", stderr)
 
+    def test_help_and_version_exit_zero(self):
+        """`--help`/`--version` are successful invocations: returning the
+        documented operational-error code (2) for them breaks shell checks."""
+        for argv in (["--help"], ["-h"], ["--version"]):
+            code = self._run(argv)[0]
+            self.assertEqual(code, 0, f"{argv} returned {code}")
+
+    def test_unknown_subcommand_exits_two(self):
+        code = self._run(["not-a-command"])[0]
+        self.assertEqual(code, 2)
+
     def test_missing_args_exit_two(self):
         code, _, _ = self._run(["process"])
         self.assertEqual(code, EXIT_ERROR)

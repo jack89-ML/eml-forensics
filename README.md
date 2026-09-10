@@ -1,12 +1,28 @@
 # eml-forensics
 
 [![CI](https://github.com/jack89-ML/eml-forensics/actions/workflows/test.yml/badge.svg)](https://github.com/jack89-ML/eml-forensics/actions)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python](https://img.shields.io/badge/python-3.10–3.14-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-93%20passing-green)](tests)
 
 A deterministic, offline digital-forensics and e-discovery CLI engine for `.eml` corpora (mailbox dumps, legal extractions, certified PEC mail).
 
 Parses complex MIME structures into normalized Markdown, preserves cryptographic chains of custody with SHA-256 manifests, unwraps CAdES `.p7m` digital signatures, restores rotated scans via adaptive OCR grids, and maps communication latency and interaction networks.
+
+---
+
+## Contents
+
+- [Subsystem Capabilities](#subsystem-capabilities)
+- [Forensic & Design Principles](#forensic--design-principles)
+- [Installation](#installation)
+- [Command Workflows & Usage](#command-workflows--usage)
+- [Exit Codes (POSIX Compliance)](#exit-codes-posix-compliance)
+- [Verification & Testing](#verification--testing)
+- [Empirical Validation & Case Studies](#empirical-validation--case-studies)
+- [Development](#development)
+- [Legal & Compliance Notice](#legal--compliance-notice)
+- [License](#license)
 
 ---
 
@@ -35,6 +51,14 @@ Parses complex MIME structures into normalized Markdown, preserves cryptographic
 ---
 
 ## Installation
+
+### Requirements
+
+- Python 3.10 – 3.14.
+- No Python dependencies for the core engine; `openssl` on `PATH` for `.p7m`
+  unwrapping, Graphviz for DOT rendering.
+- OCR is optional (`[ocr]` extra) and additionally needs the system
+  `tesseract-ocr` and `poppler` binaries.
 
 ### Core Engine (Standard Library Only)
 
@@ -166,7 +190,7 @@ emlf enrich ./evidence/processed/corpus.json --dry-run
 The test suite runs fully offline without external network or binary dependencies. Synthetic fixtures are generated dynamically using RFC 2606 reserved domains:
 
 ```bash
-# Run complete test suite (91 unit tests, zero-leak guard included)
+# Run complete test suite (93 unit tests, zero-leak guard included)
 python3 -m unittest discover -s tests -v
 
 # Run the security audit guard alone
@@ -186,10 +210,32 @@ Detailed methodology, graph metrics, and reproducer commands are documented in [
   <img src="assets/enron_graph.png" alt="Enron Interaction Graph" width="700">
 </p>
 
+## Development
+
+```bash
+git clone https://github.com/jack89-ML/eml-forensics
+cd eml-forensics
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[ocr]"
+python3 -m unittest discover -s tests -v     # 93 tests, fully offline
+```
+
+The suite generates its fixtures on RFC 2606 reserved domains, never touches
+the network, and includes a repository-wide zero-leak guard. Release history is
+in [CHANGELOG.md](CHANGELOG.md); the disclosure policy is in
+[SECURITY.md](SECURITY.md).
+
+## Related tools
+
+- [`albo-search`](https://github.com/jack89-ML/albo-search) — CLI queries to
+  Italian professional registers, used by the optional `enrich` command.
+- [`cleanrepo`](https://github.com/jack89-ML/cleanrepo) — pre-publish OPSEC
+  scanner for secrets, private networks and local paths.
+
 ## Legal & Compliance Notice
 
 This software is designed for legal professionals, digital forensics practitioners, and compliance auditors. It operates strictly in a local, read-only capacity over evidence corpora provided by the user. Users are responsible for ensuring that the ingestion and processing of correspondence conform to applicable privacy laws (including GDPR) and evidentiary rules of custody.
 
 ## License
 
-Distributed under the terms of the MIT License.
+Distributed under the terms of the MIT License — see [LICENSE](LICENSE).

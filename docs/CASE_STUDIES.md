@@ -1,7 +1,7 @@
 # Case Studies — Real-World Validation
 
 Both studies ran entirely offline against public, open datasets inside isolated
-benchmark directories (`/tmp/bench_*`), exercising `process`, `metrics`,
+benchmark directories, exercising `process`, `metrics`,
 `graph`, `scan`, and the CAdES `.p7m` unpacker on heterogeneous real data.
 
 ---
