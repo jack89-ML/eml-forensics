@@ -7,6 +7,7 @@ crashes on malformed payloads.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import email
 import email.header
@@ -92,10 +93,8 @@ def html_to_text(html_text: str) -> str:
     """Convert HTML to clean compact text, dropping tracking pixels."""
     cleaned = _TRACKING_RE.sub("", html_text)
     extractor = _TextExtractor()
-    try:
+    with contextlib.suppress(Exception):   # pragma: no cover - defensive
         extractor.feed(cleaned)
-    except Exception:  # pragma: no cover - defensive
-        pass
     lines = [re.sub(r"[ \t]+", " ", line).strip()
              for line in "".join(extractor._chunks).splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(line for line in lines if line)).strip()
@@ -167,13 +166,19 @@ class ParsedMessage:
 
 
 def _first_text_body(message) -> tuple[str | None, bool]:
-    """Preferred body: text/plain; falls back to text/html converted.
+    """Preferred body: text/plain, else text/html converted.
 
     Parts carrying a ``filename`` or a ``Content-Disposition: attachment``
     are never treated as the message body — an attached .txt or .html file
     is an attachment, not the email text.
+
+    The plain part wins regardless of the order in which the parts appear in
+    the MIME tree: returning the converted HTML as soon as it was seen made a
+    multipart/alternative carrying html *before* plain lose the most faithful
+    representation of the message.
     """
     plain: str | None = None
+    html_raw: str | None = None
     for part in message.walk():
         if part.get_filename():
             continue
@@ -183,12 +188,14 @@ def _first_text_body(message) -> tuple[str | None, bool]:
         ctype = part.get_content_type()
         if ctype == "text/plain" and plain is None:
             plain = part_text(part)
-        elif ctype == "text/html":
-            html_text = part_text(part)
-            if html_text:
-                converted = html_to_text(html_text)
-                if plain is None and converted:
-                    return converted, True
+        elif ctype == "text/html" and html_raw is None:
+            html_raw = part_text(part)
+    if plain and plain.strip():
+        return plain, False
+    if html_raw:
+        converted = html_to_text(html_raw)
+        if converted:
+            return converted, True
     return plain, False
 
 
@@ -223,6 +230,34 @@ def parse_message(raw: bytes, path: str = "") -> ParsedMessage:
     result.body_text = (body or "").strip()
     result.body_from_html = from_html
     return result
+
+
+def nested_messages(message, max_depth: int = 3) -> list[tuple[str, bytes]]:
+    """Attached messages (``message/rfc822``) as ``(label, raw bytes)`` pairs.
+
+    Forwarded mail is routinely attached as a whole message; without this the
+    nested body and its own attachments stay invisible to an e-discovery
+    corpus. Traversal stops at each attached message (it is parsed as an entry
+    of its own), so nothing is counted twice.
+    """
+    found: list[tuple[str, bytes]] = []
+
+    def visit(part, depth: int) -> None:
+        if depth > max_depth:
+            return
+        if part.get_content_type() == "message/rfc822":
+            for sub in part.get_payload() or []:
+                if hasattr(sub, "as_bytes"):
+                    label = _display(sub.get("Subject", "")) or "nested message"
+                    found.append((label, sub.as_bytes()))
+            return
+        if part.is_multipart():
+            for sub in part.get_payload() or []:
+                if hasattr(sub, "walk"):
+                    visit(sub, depth + 1)
+
+    visit(message, 0)
+    return found
 
 
 def iter_eml_files(root: Path) -> list[Path]:

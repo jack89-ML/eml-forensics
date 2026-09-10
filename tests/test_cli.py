@@ -304,3 +304,84 @@ class ScanFullBodyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NestedAndLimitsCliTest(unittest.TestCase):
+    """End-to-end: nested messages land in the corpus, attachment caps warn."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.corpus = self.root / "in"
+        self.corpus.mkdir(parents=True)
+        self.out = self.root / "out"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _run(self, argv):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), \
+                contextlib.redirect_stderr(stderr):
+            code = cli.run(argv)
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def _write_forward(self, attachment_bytes: int = 10) -> None:
+        from email.message import EmailMessage
+        inner = EmailMessage()
+        inner["Subject"] = "INNER SUBJECT"
+        inner["From"] = "carol@example.com"
+        inner["To"] = "dave@example.org"
+        inner.set_content("inner body")
+        outer = EmailMessage()
+        outer["Subject"] = "OUTER SUBJECT"
+        outer["From"] = "alice@example.com"
+        outer["To"] = "bob@example.org"
+        outer.set_content("outer body")
+        outer.add_attachment(inner, filename="forwarded.eml")
+        outer.add_attachment(b"x" * attachment_bytes,
+                             maintype="application", subtype="octet-stream",
+                             filename="payload.bin")
+        (self.corpus / "outer.eml").write_bytes(outer.as_bytes())
+
+    def test_nested_message_becomes_a_corpus_entry(self):
+        self._write_forward()
+        code, _, _ = self._run(["process", str(self.corpus),
+                                "--out", str(self.out)])
+        self.assertEqual(code, 0)
+        corpus = json.loads((self.out / "corpus.json").read_text("utf-8"))
+        self.assertEqual(corpus["count"], 2)
+        subjects = [m["subject"] for m in corpus["messages"]]
+        self.assertIn("INNER SUBJECT", subjects)
+        nested = [m for m in corpus["messages"] if m.get("nested_of")]
+        self.assertEqual(len(nested), 1)
+        self.assertEqual(nested[0]["subject"], "INNER SUBJECT")
+        bodies = list((self.out / "messages").glob("*.md"))
+        self.assertEqual(len(bodies), 2)
+        nested_body = [p for p in bodies if "INNER" in p.read_text("utf-8")]
+        self.assertEqual(len(nested_body), 1)
+        self.assertIn("Nested in:", nested_body[0].read_text("utf-8"))
+
+    def test_attachment_cap_is_reported_on_stderr(self):
+        self._write_forward(attachment_bytes=1000)
+        code, _, err = self._run(["process", str(self.corpus),
+                                  "--out", str(self.out),
+                                  "--max-attachment-size", "100"])
+        self.assertEqual(code, 0)
+        self.assertIn("attachment(s) not written", err)
+        written = list((self.out / "attachments").rglob("*.bin"))
+        self.assertEqual(written, [])
+        corpus = json.loads((self.out / "corpus.json").read_text("utf-8"))
+        outer = next(m for m in corpus["messages"]
+                     if m.get("subject") == "OUTER SUBJECT")
+        capped = [a for a in outer["attachments"] if a.get("skipped")]
+        self.assertEqual(len(capped), 1)
+        self.assertEqual(len(capped[0]["sha256"]), 64)
+
+    def test_max_nested_zero_disables_nested_parsing(self):
+        self._write_forward()
+        code, _, _ = self._run(["process", str(self.corpus),
+                                "--out", str(self.out), "--max-nested", "0"])
+        self.assertEqual(code, 0)
+        corpus = json.loads((self.out / "corpus.json").read_text("utf-8"))
+        self.assertEqual(corpus["count"], 1)

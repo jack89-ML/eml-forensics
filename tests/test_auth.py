@@ -8,12 +8,12 @@ from eml_forensics import auth
 
 class ReceivedTest(unittest.TestCase):
     HEADERS = [
-        "from mail.example.org (mail.example.org [198.51.100.7]) "
-        "by mx1.example.com with ESMTP id abc123; "
-        "Sat, 10 Jan 2026 09:05:00 +0000",
-        "from client.example.net (unknown [203.0.113.9]) "
-        "by mail.example.org with SMTP id def456; "
-        "Sat, 10 Jan 2026 09:00:00 +0000",
+        ("from mail.example.org (mail.example.org [198.51.100.7]) "
+         "by mx1.example.com with ESMTP id abc123; "
+         "Sat, 10 Jan 2026 09:05:00 +0000"),
+        ("from client.example.net (unknown [203.0.113.9]) "
+         "by mail.example.org with SMTP id def456; "
+         "Sat, 10 Jan 2026 09:00:00 +0000"),
     ]
 
     def test_hops_oldest_to_newest(self):

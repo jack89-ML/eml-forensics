@@ -36,15 +36,15 @@ def score_text(text: str) -> float:
 
 def _ocr_modules():
     try:
-        import PIL.Image  # noqa: F401
-        import pytesseract  # noqa: F401
+        import PIL.Image
+        import pytesseract
     except ImportError as exc:
         raise OptionalDependencyError(
             "OCR requires the optional extra: pip install -e \".[ocr]\" "
             "(pytesseract + pdf2image + Pillow) and a tesseract binary"
         ) from exc
     try:
-        from pdf2image import convert_from_path  # noqa: F401
+        from pdf2image import convert_from_path
     except ImportError:
         convert_from_path = None
     import pytesseract

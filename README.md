@@ -3,7 +3,8 @@
 [![CI](https://github.com/jack89-ML/eml-forensics/actions/workflows/test.yml/badge.svg)](https://github.com/jack89-ML/eml-forensics/actions)
 [![Python](https://img.shields.io/badge/python-3.10–3.14-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-93%20passing-green)](tests)
+[![tests](https://img.shields.io/badge/tests-108%20passing-green)](tests)
+[![coverage](https://img.shields.io/badge/coverage-86%25-green)](pyproject.toml)
 
 A deterministic, offline digital-forensics and e-discovery CLI engine for `.eml` corpora (mailbox dumps, legal extractions, certified PEC mail).
 
@@ -176,6 +177,21 @@ emlf enrich ./evidence/processed/corpus.json --foro MILANO
 emlf enrich ./evidence/processed/corpus.json --dry-run
 ```
 
+## Limits and evidential honesty
+
+- **Attachments are capped**: `--max-attachment-size` (default 100 MiB per
+  attachment) and `--attachment-budget` (default 500 MiB per message). A
+  skipped payload keeps its name, size and SHA-256 in the manifest with the
+  reason, so an omission is auditable rather than silent.
+- **Attached messages are parsed** (`message/rfc822`): forwarded mail becomes
+  its own corpus entry linked with `nested_of`, bounded by `--max-nested`.
+- **Signatures are unwrapped, not verified.** `.p7m` envelopes are opened with
+  `openssl smime -verify -noverify`: the CMS container is unpacked and its
+  signer certificates are reported (CN, issuer, validity window, SHA-256
+  fingerprint), but the signature is **not** cryptographically validated. The
+  result carries `signature_verified: false`. Validate the chain out of band
+  with a trusted CA store when the evidence requires it.
+
 ## Exit Codes (POSIX Compliance)
 
 | Exit Code | Classification | Condition |
@@ -190,7 +206,7 @@ emlf enrich ./evidence/processed/corpus.json --dry-run
 The test suite runs fully offline without external network or binary dependencies. Synthetic fixtures are generated dynamically using RFC 2606 reserved domains:
 
 ```bash
-# Run complete test suite (93 unit tests, zero-leak guard included)
+# Run complete test suite (108 unit tests, zero-leak guard included)
 python3 -m unittest discover -s tests -v
 
 # Run the security audit guard alone
@@ -217,11 +233,12 @@ git clone https://github.com/jack89-ML/eml-forensics
 cd eml-forensics
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[ocr]"
-python3 -m unittest discover -s tests -v     # 93 tests, fully offline
+python3 -m unittest discover -s tests -v     # 108 tests, fully offline
 ```
 
 The suite generates its fixtures on RFC 2606 reserved domains, never touches
-the network, and includes a repository-wide zero-leak guard. Release history is
+the network, and includes a repository-wide zero-leak guard. CI enforces
+`ruff` and a coverage gate (86% measured, fails under 80%). Release history is
 in [CHANGELOG.md](CHANGELOG.md); the disclosure policy is in
 [SECURITY.md](SECURITY.md).
 

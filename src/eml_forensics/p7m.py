@@ -50,26 +50,63 @@ def _run(cmd: list[str]) -> tuple[int, str]:
     return completed.returncode, (completed.stderr or completed.stdout or "")
 
 
+_PEM_BLOCK = re.compile(
+    r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", re.S)
+
+
+def _field(text: str, key: str) -> str:
+    """Value of a ``key=...`` line in openssl output (multi-line handled)."""
+    match = re.search(rf"^{re.escape(key)}=(.*)$", text, re.M)
+    return match.group(1).strip() if match else ""
+
+
+def _fingerprint(text: str) -> str:
+    """SHA-256 fingerprint, normalised (OpenSSL prints ``sha256 Fingerprint=``)."""
+    match = re.search(r"^.*?Fingerprint=(.*)$", text, re.M)
+    if not match:
+        return ""
+    return match.group(1).strip().replace(":", "").lower()
+
+
+def _certificate_info(pem_block: str) -> dict | None:
+    """Subject, issuer, validity window and SHA-256 fingerprint of one PEM."""
+    try:
+        completed = subprocess.run(
+            ["openssl", "x509", "-noout", "-subject", "-issuer",
+             "-startdate", "-enddate", "-fingerprint", "-sha256"],
+            input=pem_block.encode(), capture_output=True, timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    text = completed.stdout.decode(errors="replace")
+    return {
+        "cn": _cn_of(_field(text, "subject")),
+        "issuer_cn": _cn_of(_field(text, "issuer")),
+        "not_before": _field(text, "notBefore"),
+        "not_after": _field(text, "notAfter"),
+        "fingerprint_sha256": _fingerprint(text),
+    }
+
+
 def signer_certificates(p7m_path: Path) -> list[dict]:
-    """List signer certificates: CN, issuer CN, validity end (if shown)."""
+    """Signer certificates carried by the envelope.
+
+    Returns CN, issuer CN, validity window and SHA-256 fingerprint per
+    certificate. NOTE: the envelope is unwrapped with ``smime -verify
+    -noverify``, so the signature is NOT cryptographically validated here —
+    this is metadata for the chain-of-custody report, and validation must be
+    performed with a trusted CA store if it is required.
+    """
     code, output = _run(["openssl", "pkcs7", "-inform", "DER",
                          "-print_certs", "-in", str(p7m_path)])
     if code != 0:
         return []
     certificates: list[dict] = []
-    subject_cn = issuer_cn = ""
-    for line in output.splitlines():
-        line = line.strip()
-        if line.startswith("subject="):
-            subject_cn = _cn_of(line[8:])
-        elif line.startswith("issuer="):
-            issuer_cn = _cn_of(line[7:])
-        elif line.startswith("-----BEGIN"):
-            if subject_cn:
-                certificates.append({"cn": subject_cn, "issuer_cn": issuer_cn})
-            subject_cn = issuer_cn = ""
-    if subject_cn:  # trailing certificate without closing banner parsed
-        certificates.append({"cn": subject_cn, "issuer_cn": issuer_cn})
+    for block in _PEM_BLOCK.findall(output):
+        info = _certificate_info(block)
+        if info:
+            certificates.append(info)
     return certificates
 
 
@@ -97,6 +134,9 @@ def unpack_p7m(p7m_path: Path, out_path: Path) -> dict:
         "sha256_envelope": sha256_file(p7m_path),
         "sha256_payload": None,
         "signers": [],
+        # explicit: the envelope is unwrapped, not validated. A forensics
+        # report must never imply a verified signature it did not check.
+        "signature_verified": False,
         "error": "",
     }
     code, message = _run(["openssl", "smime", "-verify", "-noverify",

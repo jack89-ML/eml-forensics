@@ -66,3 +66,61 @@ class AttachmentsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AttachmentLimitsTest(unittest.TestCase):
+    """Untrusted corpora must not be able to fill the disk."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dest = Path(self._tmp.name) / "att"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    @staticmethod
+    def _with_attachments(*sizes: int) -> object:
+        from email.message import EmailMessage
+        msg = EmailMessage()
+        msg["Subject"] = "with attachments"
+        msg["From"] = "alice@example.com"
+        msg["To"] = "bob@example.org"
+        msg.set_content("body")
+        for index, size in enumerate(sizes, start=1):
+            msg.add_attachment(b"x" * size, maintype="application",
+                               subtype="octet-stream",
+                               filename=f"file{index}.bin")
+        return msg
+
+    def test_oversized_attachment_is_skipped_with_a_reason(self):
+        msg = self._with_attachments(1000)
+        manifest = attachments.extract_attachments(msg, self.dest, max_size=100)
+        self.assertEqual(len(manifest), 1)
+        self.assertEqual(manifest[0]["file"], "")
+        self.assertIn("larger than", manifest[0]["skipped"])
+        self.assertEqual(manifest[0]["size"], 1000)
+        self.assertEqual(len(manifest[0]["sha256"]), 64)   # hash kept anyway
+        self.assertEqual(list(self.dest.iterdir()), [])
+
+    def test_budget_stops_after_the_first_attachment(self):
+        msg = self._with_attachments(600, 600)
+        manifest = attachments.extract_attachments(msg, self.dest, budget=1000)
+        self.assertTrue(manifest[0]["file"])
+        self.assertIn("budget", manifest[1]["skipped"])
+        self.assertEqual(len(list(self.dest.iterdir())), 1)
+
+    def test_without_limits_everything_is_written(self):
+        msg = self._with_attachments(10, 10)
+        manifest = attachments.extract_attachments(msg, self.dest)
+        self.assertTrue(all(item["file"] for item in manifest))
+        self.assertEqual(len(list(self.dest.iterdir())), 2)
+
+    def test_long_filename_is_truncated_keeping_the_extension(self):
+        name = attachments.safe_filename("a" * 300 + ".pdf")
+        self.assertLessEqual(len(name), attachments.MAX_NAME_LENGTH)
+        self.assertTrue(name.endswith(".pdf"))
+
+    def test_traversal_is_still_neutralized(self):
+        self.assertEqual(attachments.safe_filename("../../etc/passwd"), "passwd")
+        self.assertEqual(attachments.safe_filename("/abs/path/report.pdf"),
+                         "report.pdf")

@@ -82,7 +82,6 @@ class ThreadMetricsTest(unittest.TestCase):
     def test_future_message_is_never_a_parent(self):
         """Without reference headers, replies chain to predecessors only —
         a later message can never parent an earlier one."""
-        base = "2026-02-01T09:00:00+00:00"
 
         def msg(msg_id, day, subject="Status report"):
             return ThreadMessage(

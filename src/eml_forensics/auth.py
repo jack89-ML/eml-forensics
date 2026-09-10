@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as _dt
 import email.utils
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 _IP_RE = re.compile(r"\[([0-9a-fA-F.:]+)\]")
 _HELO_RE = re.compile(r"from\s+([^\s;(]+)")

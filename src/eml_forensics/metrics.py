@@ -9,6 +9,7 @@ are intra-thread gaps beyond a configurable threshold.
 from __future__ import annotations
 
 import datetime as _dt
+import itertools
 import re
 from dataclasses import dataclass, field
 
@@ -158,7 +159,7 @@ def build_threads(messages: list[ThreadMessage],
                                                child=message.message_id,
                                                delay_seconds=delay))
 
-        for earlier, later in zip(ordered, ordered[1:]):
+        for earlier, later in itertools.pairwise(ordered):
             if earlier.when and later.when:
                 gap_days = (later.when - earlier.when).days
                 if gap_days > blackout_days:

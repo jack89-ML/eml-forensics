@@ -88,3 +88,50 @@ class UnpackTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(OPENSSL, "openssl binary not available")
+class CertificateMetadataTest(unittest.TestCase):
+    """The chain-of-custody report needs subject, validity and fingerprint —
+    and must state that the signature was not verified."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        self.key = self.dir / "key.pem"
+        self.cert = self.dir / "cert.pem"
+        self.envelope = self.dir / "signed.p7m"
+        self.payload = self.dir / "payload.txt"
+        self.payload.write_text("signed payload\n", encoding="utf-8")
+        subprocess.run([OPENSSL, "req", "-x509", "-newkey", "rsa:2048",
+                        "-keyout", str(self.key), "-out", str(self.cert),
+                        "-days", "30", "-nodes", "-subj", "/CN=Test Signer/O=Unit"],
+                       capture_output=True, check=False)
+        subprocess.run([OPENSSL, "smime", "-sign", "-in", str(self.payload),
+                        "-signer", str(self.cert), "-inkey", str(self.key),
+                        "-out", str(self.envelope), "-outform", "DER",
+                        "-nodetach"],
+                       capture_output=True, check=False)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_certificates_carry_validity_and_fingerprint(self):
+        if not self.envelope.is_file():
+            self.skipTest("openssl could not build the envelope")
+        signers = p7m.signer_certificates(self.envelope)
+        self.assertTrue(signers)
+        signer = signers[0]
+        self.assertIn("Test Signer", signer["cn"])
+        self.assertTrue(signer["not_after"])
+        self.assertTrue(signer["not_before"])
+        self.assertEqual(len(signer["fingerprint_sha256"]), 64)
+
+    def test_unwrap_reports_that_the_signature_was_not_verified(self):
+        if not self.envelope.is_file():
+            self.skipTest("openssl could not build the envelope")
+        out = self.dir / "payload.out"
+        result = p7m.unpack_p7m(self.envelope, out)
+        self.assertIn("signature_verified", result)
+        self.assertFalse(result["signature_verified"])
+        self.assertTrue(result["signers"])

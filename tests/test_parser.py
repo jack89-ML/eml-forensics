@@ -107,3 +107,80 @@ class ParserTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AlternativeBodyTest(unittest.TestCase):
+    """text/plain must win over text/html whatever the part order."""
+
+    @staticmethod
+    def _message(html_first: bool) -> bytes:
+        from email.message import EmailMessage
+        msg = EmailMessage()
+        msg["Subject"] = "alternative"
+        msg["From"] = "alice@example.com"
+        msg["To"] = "bob@example.org"
+        if html_first:
+            msg.set_content("<p>HTML BODY</p>", subtype="html")
+            msg.add_alternative("PLAIN BODY", subtype="plain")
+        else:
+            msg.set_content("PLAIN BODY")
+            msg.add_alternative("<p>HTML BODY</p>", subtype="html")
+        return msg.as_bytes()
+
+    def test_plain_wins_when_html_comes_first(self):
+        parsed = parser.parse_message(self._message(html_first=True))
+        self.assertIn("PLAIN BODY", parsed.body_text)
+        self.assertNotIn("HTML BODY", parsed.body_text)
+        self.assertFalse(parsed.body_from_html)
+
+    def test_plain_wins_when_plain_comes_first(self):
+        parsed = parser.parse_message(self._message(html_first=False))
+        self.assertIn("PLAIN BODY", parsed.body_text)
+        self.assertFalse(parsed.body_from_html)
+
+    def test_html_is_used_when_there_is_no_plain_part(self):
+        from email.message import EmailMessage
+        msg = EmailMessage()
+        msg["Subject"] = "html only"
+        msg["From"] = "alice@example.com"
+        msg["To"] = "bob@example.org"
+        msg.set_content("<p>ONLY HTML</p>", subtype="html")
+        parsed = parser.parse_message(msg.as_bytes())
+        self.assertIn("ONLY HTML", parsed.body_text)
+        self.assertTrue(parsed.body_from_html)
+
+
+class NestedMessageTest(unittest.TestCase):
+    """Forwarded mail travels as an attached message/rfc822."""
+
+    @staticmethod
+    def _forwarded() -> bytes:
+        from email.message import EmailMessage
+        inner = EmailMessage()
+        inner["Subject"] = "INNER SUBJECT"
+        inner["From"] = "carol@example.com"
+        inner["To"] = "dave@example.org"
+        inner.set_content("inner body")
+        outer = EmailMessage()
+        outer["Subject"] = "OUTER"
+        outer["From"] = "alice@example.com"
+        outer["To"] = "bob@example.org"
+        outer.set_content("outer body")
+        outer.add_attachment(inner, filename="forwarded.eml")
+        return outer.as_bytes()
+
+    def test_nested_message_is_found(self):
+        raw = self._forwarded()
+        found = parser.nested_messages(parser.parse_bytes(raw))
+        self.assertEqual(len(found), 1)
+        label, nested_raw = found[0]
+        self.assertIn("INNER SUBJECT", label)
+        nested = parser.parse_message(nested_raw)
+        self.assertIn("inner body", nested.body_text)
+
+    def test_plain_message_has_no_nested_messages(self):
+        raw = parser.parse_message.__doc__ is not None  # keep the import used
+        self.assertEqual(parser.nested_messages(parser.parse_bytes(
+            b"From: a@example.com\nTo: b@example.org\nSubject: s\n\nbody\n"
+        )), [])
+        self.assertTrue(raw)

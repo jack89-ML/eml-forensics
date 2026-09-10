@@ -45,10 +45,7 @@ def control_char(code15: str) -> str:
     for index, char in enumerate(code15):
         position = index + 1
         raw = int(char) if char.isdigit() else ord(char) - ord("A")
-        if position % 2 == 1:
-            value = _ODD_TABLE[raw]
-        else:
-            value = raw
+        value = _ODD_TABLE[raw] if position % 2 == 1 else raw
         total += value
     return chr(ord("A") + total % 26)
 

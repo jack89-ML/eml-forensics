@@ -29,8 +29,8 @@ def _surname(name: str) -> str:
 
 def _is_pec(address: str) -> bool:
     domain = address.rsplit("@", 1)[-1].lower() if "@" in address else ""
-    return ".pec." in domain or domain.startswith("pec.") or \
-        domain.endswith(".pec.it") or domain.startswith("legalmail")
+    return (".pec." in domain or domain.startswith(("pec.", "legalmail"))
+            or domain.endswith(".pec.it"))
 
 
 def collect_participants(entries: list[dict]) -> list[Participant]:
@@ -119,10 +119,11 @@ def render_table(rows: list[dict]) -> str:
     columns = [headers] + [[str(row.get(h, "")) for h in headers]
                            for row in rows]
     widths = [max(len(cell) for cell in column)
-              for column in zip(*columns)]
+              for column in zip(*columns, strict=False)]
     lines = ["  ".join(cell.ljust(w) for cell, w in
-                       zip(columns[0], widths))]
+                       zip(columns[0], widths, strict=False))]
     lines.append("-" * (sum(widths) + 2 * (len(headers) - 1)))
     for row in columns[1:]:
-        lines.append("  ".join(cell.ljust(w) for cell, w in zip(row, widths)))
+        lines.append("  ".join(cell.ljust(w) for cell, w in
+                          zip(row, widths, strict=False)))
     return "\n".join(lines)

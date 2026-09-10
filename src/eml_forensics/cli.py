@@ -17,15 +17,17 @@ from . import __version__
 from .attachments import extract_attachments
 from .auth import analyze_headers
 from .enrich import collect_participants, correlate, render_table
-from .errors import (EXIT_EMPTY, EXIT_ERROR, EXIT_INTERRUPTED, ForensicsError)
+from .errors import (EXIT_EMPTY, EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK,
+                     ForensicsError)
 from .graph import interactions, to_dot, to_json
 from .metrics import ThreadMessage, build_threads
 from .ocr_grid import iter_ocr_targets, ocr_file
 from .output import (entry_to_dict, load_corpus, timeline_csv, timeline_rows,
                      timeline_table, write_corpus)
 from .p7m import is_p7m, payload_stem, unpack_p7m
-from .parser import ParsedMessage, iter_eml_files, parse_bytes, parse_message
-from .scanner import load_watchlist, scan_text, snippet
+from .parser import (ParsedMessage, iter_eml_files, nested_messages,
+                     parse_bytes, parse_message)
+from .scanner import load_watchlist, scan_text
 
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -93,10 +95,17 @@ def _cmd_process(args) -> int:
         parsed.attachments = []
         if has_attachments:
             message_attach_dir = attachments_dir / base
-            parsed.attachments = extract_attachments(message_obj,
-                                                     message_attach_dir)
+            parsed.attachments = extract_attachments(
+                message_obj, message_attach_dir,
+                max_size=args.max_attachment_size,
+                budget=args.attachment_budget)
             for item in parsed.attachments:
-                item["file"] = f"attachments/{item['file']}"
+                if item["file"]:
+                    item["file"] = f"attachments/{item['file']}"
+        skipped = [item for item in parsed.attachments if item.get("skipped")]
+        if skipped:
+            print(f"warning: {base}: {len(skipped)} attachment(s) not written "
+                  f"({skipped[0]['skipped']})", file=sys.stderr)
         body_file = f"{base}.md"
         (messages_dir / body_file).write_text(
             f"# {parsed.subject}\n\n"
@@ -113,6 +122,41 @@ def _cmd_process(args) -> int:
         if args.p7m and has_attachments:
             entry["p7m"] = _unpack_p7m(message_obj, attachments_dir / base)
         entries.append(entry)
+
+        # Forwarded mail arrives attached as a whole message: parse it as its
+        # own corpus entry, otherwise its body and attachments are invisible.
+        nested = nested_messages(message_obj)[:max(0, args.max_nested)]
+        for nested_index, (label, nested_raw) in enumerate(nested, start=1):
+            try:
+                nested_parsed = parse_message(nested_raw, f"{base}!/{label}")
+            except ForensicsError as exc:
+                print(f"warning: nested message skipped ({exc})", file=sys.stderr)
+                continue
+            nested_base = f"{base}-n{nested_index:02d}_{_slug(label, 'nested')}"
+            nested_body = f"{nested_base}.md"
+            nested_obj = parse_bytes(nested_raw)
+            nested_parsed.attachments = []
+            if any(part.get_filename() for part in nested_obj.walk()):
+                nested_parsed.attachments = extract_attachments(
+                    nested_obj, attachments_dir / nested_base,
+                    max_size=args.max_attachment_size,
+                    budget=args.attachment_budget)
+                for item in nested_parsed.attachments:
+                    if item["file"]:
+                        item["file"] = f"attachments/{item['file']}"
+            (messages_dir / nested_body).write_text(
+                f"# {nested_parsed.subject}\n\n"
+                f"- Nested in: {base}\n"
+                f"- Date: {nested_parsed.date}\n"
+                f"- From: {_address_str(nested_parsed.from_addr)}\n"
+                f"- To: {_address_str(nested_parsed.to)}\n\n"
+                f"{nested_parsed.body_text}\n",
+                encoding="utf-8")
+            nested_entry = entry_to_dict(nested_parsed, nested_body)
+            nested_entry["nested_of"] = base
+            nested_entry["auth"] = analyze_headers(nested_obj)
+            nested_entry["p7m"] = []
+            entries.append(nested_entry)
 
     corpus = write_corpus(entries, out_dir)
     timeline = timeline_rows(entries)
@@ -283,7 +327,7 @@ def _cmd_ocr(args) -> int:
 
 
 def _cmd_metrics(args) -> int:
-    entries, source = _parse_corpus_input(args.input)
+    entries, _source = _parse_corpus_input(args.input)
     if not entries:
         if args.json:
             print(json.dumps({"threads": [], "count": 0}))
@@ -373,6 +417,16 @@ def _parser() -> argparse.ArgumentParser:
     p_proc.add_argument("--out", required=True, help="output directory")
     p_proc.add_argument("--p7m", action="store_true",
                         help="unwrap CAdES (.p7m) attachments with openssl")
+    p_proc.add_argument("--max-attachment-size", type=int, default=100 << 20,
+                        metavar="BYTES",
+                        help="skip a single attachment larger than this "
+                             "(default 100 MiB)")
+    p_proc.add_argument("--attachment-budget", type=int, default=500 << 20,
+                        metavar="BYTES",
+                        help="total bytes written per message (default 500 MiB)")
+    p_proc.add_argument("--max-nested", type=int, default=20, metavar="N",
+                        help="attached messages (message/rfc822) parsed per "
+                             "email (default 20)")
 
     p_ocr = sub.add_parser("ocr", help="OCR images/PDFs with rotation grid")
     p_ocr.add_argument("input", help="file or directory")

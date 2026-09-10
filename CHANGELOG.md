@@ -7,6 +7,36 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-10
+
+### Added
+
+- Attached messages (`message/rfc822`) are parsed as their own corpus entries
+  with a `nested_of` link: forwarded mail used to be invisible to the corpus,
+  bodies and attachments included. `--max-nested` bounds the recursion.
+- Attachment limits: `--max-attachment-size` (default 100 MiB per attachment)
+  and `--attachment-budget` (default 500 MiB per message). A skipped payload
+  keeps its name, size and SHA-256 in the manifest plus the reason, so the
+  omission stays auditable; oversized or unwritable attachments no longer abort
+  the corpus.
+- Signature metadata per signer certificate: validity window
+  (`not_before`/`not_after`) and SHA-256 fingerprint, next to the CN and issuer.
+- Explicit `signature_verified: false` in the unpacking result: the envelope is
+  unwrapped with `smime -verify -noverify`, i.e. not cryptographically
+  validated. A forensic report must not imply a check it did not perform.
+- Lint (ruff) and coverage (86.5% measured, fails under 80%) gates in CI.
+
+### Fixed
+
+- **`text/plain` wins over `text/html` regardless of MIME part order.** An
+  alternative part carrying HTML before the plain text made the converted HTML
+  win, losing the most faithful representation of the message.
+- Filenames longer than 120 characters are truncated keeping the extension: a
+  hostile or careless MIME filename used to raise `OSError` and abort the run.
+- `EXIT_OK` was referenced in `cli.run` without being imported (latent
+  `NameError` on the argparse path).
+
+
 ## [0.1.0] - 2026-09-04
 
 ### Added
